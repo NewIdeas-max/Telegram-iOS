@@ -1,8 +1,8 @@
 diff --git a/Telegram/Telegram-iOS/en.lproj/Localizable.strings b/Telegram/Telegram-iOS/en.lproj/Localizable.strings
-index 242e45b3..1b5f8e78 100644
+index 242e45b3..872af82c 100644
 --- a/Telegram/Telegram-iOS/en.lproj/Localizable.strings
 +++ b/Telegram/Telegram-iOS/en.lproj/Localizable.strings
-@@ -17243,3 +17243,10 @@ Error: %8$@";
+@@ -17243,3 +17243,17 @@ Error: %8$@";
  "Gift.Delete.Title" = "Delete Gift";
  "Gift.Delete.Text" = "Do you want to delete this gift?\n\nIt will disappear from your profile and can't be restored.";
  "Gift.Delete.Success" = "Gift Deleted";
@@ -13,6 +13,13 @@ index 242e45b3..1b5f8e78 100644
 +"Channel.AdminLog.MessageNicknameSet" = "set group nickname to %@";
 +"Channel.AdminLog.MessageNicknameChanged" = "changed group nickname from %1$@ to %2$@";
 +"Channel.AdminLog.MessageNicknameRemoved" = "removed group nickname %@";
++"GroupNickname.MenuItem" = "Set My Nickname";
++"GroupNickname.Title" = "My Nickname in This Group";
++"GroupNickname.Info" = "Shown instead of your name in this group only. Members will see that you changed it. Leave empty to use your regular name.";
++"GroupNickname.Placeholder" = "Nickname";
++"GroupNickname.ErrorTooLong" = "This nickname is too long.";
++"GroupNickname.ErrorForbidden" = "Admins of this group don’t allow members to change their nickname.";
++"GroupNickname.ErrorFlood" = "You’re changing your nickname too often. Please try again later.";
 diff --git a/submodules/TelegramApi/swift_scheme.tl b/submodules/TelegramApi/swift_scheme.tl
 index 2b9bc44c..3bd24256 100644
 --- a/submodules/TelegramApi/swift_scheme.tl
@@ -351,10 +358,10 @@ index 0f7a88f4..1292de71 100644
                                  if let action = action {
 diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Peers/Nicknames.swift b/submodules/TelegramCore/Sources/TelegramEngine/Peers/Nicknames.swift
 new file mode 100644
-index 00000000..c1aa244a
+index 00000000..aba8be8c
 --- /dev/null
 +++ b/submodules/TelegramCore/Sources/TelegramEngine/Peers/Nicknames.swift
-@@ -0,0 +1,83 @@
+@@ -0,0 +1,98 @@
 +import Foundation
 +import Postbox
 +import SwiftSignalKit
@@ -438,11 +445,26 @@ index 00000000..c1aa244a
 +        })
 +    }
 +}
++
++/// The current user's nickname in `peerId` as last seen on their own messages, or nil if unknown.
++/// Used to prefill the editor. When the server adds the nickname to the participant
++/// object, this should read it from there instead.
++func _internal_ownGroupNickname(account: Account, peerId: PeerId) -> Signal<String?, NoError> {
++    return account.postbox.transaction { transaction -> String? in
++        let historyView = transaction.getMessagesHistoryViewState(input: .single(peerId: peerId, threadId: nil), ignoreMessagesInTimestampRange: nil, ignoreMessageIds: Set(), count: 200, clipHoles: true, anchor: .upperBound, namespaces: .just(Set([Namespaces.Message.Cloud])))
++        for entry in historyView.entries.reversed() {
++            if entry.message.author?.id == account.peerId {
++                return entry.message.authorGroupNickname ?? ""
++            }
++        }
++        return nil
++    }
++}
 diff --git a/submodules/TelegramCore/Sources/TelegramEngine/Peers/TelegramEnginePeers.swift b/submodules/TelegramCore/Sources/TelegramEngine/Peers/TelegramEnginePeers.swift
-index a5f736c0..74cb55b8 100644
+index a5f736c0..3e5146e6 100644
 --- a/submodules/TelegramCore/Sources/TelegramEngine/Peers/TelegramEnginePeers.swift
 +++ b/submodules/TelegramCore/Sources/TelegramEngine/Peers/TelegramEnginePeers.swift
-@@ -671,6 +671,11 @@ public extension TelegramEngine {
+@@ -671,6 +671,16 @@ public extension TelegramEngine {
          public func updateChatRank(peerId: PeerId, userId: PeerId, messageId: MessageId? = nil, rank: String?) -> Signal<(ChannelParticipant?, RenderedChannelParticipant)?, UpdateChatRankError> {
              return _internal_updateChatRank(account: account, peerId: peerId, userId: userId, messageId: messageId, rank: rank)
          }
@@ -450,6 +472,11 @@ index a5f736c0..74cb55b8 100644
 +        /// Sets the current user's nickname in a group. An empty string removes it.
 +        public func updateOwnChatNickname(peerId: PeerId, nickname: String) -> Signal<Never, UpdateChatNicknameError> {
 +            return _internal_updateOwnChatNickname(account: self.account, peerId: peerId, nickname: nickname)
++        }
++        
++        /// The current user's nickname in a group, as far as this device knows. Nil if unknown.
++        public func ownGroupNickname(peerId: PeerId) -> Signal<String?, NoError> {
++            return _internal_ownGroupNickname(account: self.account, peerId: peerId)
 +        }
  
          public func terminateSecretChat(peerId: PeerId, requestRemoteHistoryRemoval: Bool) -> Signal<Never, NoError> {
@@ -529,3 +556,145 @@ index eb3d576a..6abedd1f 100644
              let message = Message(stableId: self.entry.stableId, stableVersion: 0, id: MessageId(peerId: peer.id, namespace: Namespaces.Message.Cloud, id: Int32(bitPattern: self.entry.stableId)), globallyUniqueId: self.entry.event.id, groupingKey: nil, groupInfo: nil, threadId: nil, timestamp: self.entry.event.date, flags: [.Incoming], tags: [], globalTags: [], localTags: [], customTags: [], forwardInfo: nil, author: author, text: text, attributes: attributes, media: [], peers: peers, associatedMessages: SimpleDictionary(), associatedMessageIds: [], associatedMedia: [:], associatedThreadInfo: nil, associatedStories: [:])
              return ChatMessageItemImpl(presentationData: self.presentationData, context: context, chatLocation: .peer(id: peer.id), associatedData: ChatMessageItemAssociatedData(automaticDownloadPeerType: .channel, automaticDownloadPeerId: nil, automaticDownloadNetworkType: .cellular, isRecentActions: true, availableReactions: availableReactions, availableMessageEffects: availableMessageEffects, savedMessageTags: nil, defaultReaction: nil, areStarReactionsEnabled: false, isPremium: false, accountPeer: nil), controllerInteraction: controllerInteraction, content: .message(message: message, read: true, selection: .none, attributes: ChatMessageEntryAttributes(), location: nil))
          }
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD
+index 0ca07f27..2b981bb9 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/BUILD
+@@ -94,6 +94,7 @@ swift_library(
+         "//submodules/PhotoResources",
+         "//submodules/PremiumUI",
+         "//submodules/PresentationDataUtils",
++        "//submodules/PromptUI",
+         "//submodules/QrCode",
+         "//submodules/QrCodeUI",
+         "//submodules/RadialStatusNode",
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoGroupNickname.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoGroupNickname.swift
+new file mode 100644
+index 00000000..9a99ede8
+--- /dev/null
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoGroupNickname.swift
+@@ -0,0 +1,86 @@
++import Foundation
++import UIKit
++import Display
++import SwiftSignalKit
++import TelegramCore
++import AccountContext
++import TelegramPresentationData
++import PresentationDataUtils
++import PromptUI
++
++/// Whether the current user may set their own nickname in this supergroup.
++func peerInfoCanEditOwnGroupNickname(peer channel: TelegramChannel) -> Bool {
++    if case .broadcast = channel.info {
++        return false
++    }
++    guard case .member = channel.participationStatus else {
++        return false
++    }
++    return channel.hasPermission(.editNickname)
++}
++
++/// Whether the current user may set their own nickname in this basic group.
++func peerInfoCanEditOwnGroupNickname(peer group: TelegramGroup) -> Bool {
++    guard case .Member = group.membership else {
++        return false
++    }
++    if case .member = group.role {
++        return !(group.defaultBannedRights?.flags.contains(.banEditNickname) ?? false)
++    }
++    return true
++}
++
++extension PeerInfoScreenNode {
++    func openEditOwnGroupNickname() {
++        let context = self.context
++        let peerId = self.peerId
++        let _ = (context.engine.peers.ownGroupNickname(peerId: peerId)
++        |> take(1)
++        |> deliverOnMainQueue).startStandalone(next: { [weak self] current in
++            guard let self, let controller = self.controller else {
++                return
++            }
++            let strings = self.presentationData.strings
++            let prompt = promptController(
++                context: context,
++                updatedPresentationData: controller.updatedPresentationData,
++                text: strings.GroupNickname_Title,
++                titleFont: .bold,
++                subtitle: strings.GroupNickname_Info,
++                value: current ?? "",
++                placeholder: strings.GroupNickname_Placeholder,
++                characterLimit: groupNicknameMaxLength,
++                displayCharacterLimit: true,
++                apply: { [weak self] value in
++                    guard let self, let value else {
++                        return
++                    }
++                    self.applyOwnGroupNickname(value)
++                }
++            )
++            controller.present(prompt, in: .window(.root))
++        })
++    }
++    
++    private func applyOwnGroupNickname(_ nickname: String) {
++        let _ = (self.context.engine.peers.updateOwnChatNickname(peerId: self.peerId, nickname: nickname)
++        |> deliverOnMainQueue).startStandalone(error: { [weak self] error in
++            guard let self, let controller = self.controller else {
++                return
++            }
++            let strings = self.presentationData.strings
++            let text: String
++            switch error {
++            case .tooLong:
++                text = strings.GroupNickname_ErrorTooLong
++            case .changeForbidden:
++                text = strings.GroupNickname_ErrorForbidden
++            case .flood:
++                text = strings.GroupNickname_ErrorFlood
++            case .generic:
++                text = strings.Login_UnknownError
++            }
++            controller.present(textAlertController(context: self.context, updatedPresentationData: controller.updatedPresentationData, title: nil, text: text, actions: [TextAlertAction(type: .defaultAction, title: strings.Common_OK, action: {})]), in: .window(.root))
++        })
++    }
++}
+diff --git a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenPerformButtonAction.swift b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenPerformButtonAction.swift
+index 63293572..1aa8e7a6 100644
+--- a/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenPerformButtonAction.swift
++++ b/submodules/TelegramUI/Components/PeerInfo/PeerInfoScreen/Sources/PeerInfoScreenPerformButtonAction.swift
+@@ -980,6 +980,16 @@ extension PeerInfoScreenNode {
+                         }
+                     }
+                     
++                    if peerInfoCanEditOwnGroupNickname(peer: channel) {
++                        items.append(.action(ContextMenuActionItem(text: presentationData.strings.GroupNickname_MenuItem, icon: { theme in
++                            generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Edit"), color: theme.contextMenu.primaryColor)
++                        }, action: { [weak self] _, f in
++                            f(.dismissWithoutContent)
++                            
++                            self?.openEditOwnGroupNickname()
++                        })))
++                    }
++                    
+                     var canReport = true
+                     if channel.adminRights != nil {
+                         canReport = false
+@@ -1238,6 +1248,16 @@ extension PeerInfoScreenNode {
+                         })))
+                     }
+                     
++                    if peerInfoCanEditOwnGroupNickname(peer: group) {
++                        items.append(.action(ContextMenuActionItem(text: presentationData.strings.GroupNickname_MenuItem, icon: { theme in
++                            generateTintedImage(image: UIImage(bundleImageName: "Chat/Context Menu/Edit"), color: theme.contextMenu.primaryColor)
++                        }, action: { [weak self] _, f in
++                            f(.dismissWithoutContent)
++                            
++                            self?.openEditOwnGroupNickname()
++                        })))
++                    }
++                    
+                     var canReport = true
+                     if case .creator = group.role {
+                         canReport = false
