@@ -1,0 +1,71 @@
+# Compile check for the group-nicknames patch on a GitHub-hosted Mac.
+# Runs on every push to the "nicknames" branch of this fork.
+name: Build group nicknames
+
+on:
+  push:
+    branches: [ nicknames ]
+
+jobs:
+  build:
+    runs-on: xcode-27          # standard Apple Silicon runner, free for public repositories
+    timeout-minutes: 360
+
+    steps:
+      - name: Get the patch from this branch
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/nicknames.patch" -o "$RUNNER_TEMP/nicknames.patch"
+          wc -l "$RUNNER_TEMP/nicknames.patch"
+
+      - name: Check out Telegram-iOS at the commit the patch was made against
+        run: |
+          set -e
+          git init telegram
+          cd telegram
+          git remote add origin https://github.com/TelegramMessenger/Telegram-iOS.git
+          git fetch --depth 1 origin fb0e62ba8a147f0821da6aa63c09da7d79a10111
+          git checkout FETCH_HEAD
+          git submodule update --init --recursive --depth 1 --jobs 8
+
+      - name: Apply the patch
+        run: |
+          cd telegram
+          git apply --whitespace=nowarn "$RUNNER_TEMP/nicknames.patch"
+          git status --short
+
+      - name: Build for the simulator
+        run: |
+          set -o pipefail
+          cd telegram
+          xcodebuild -version
+          python3 build-system/Make/ImportCertificates.py --path build-system/fake-codesigning/certs
+          python3 -u build-system/Make/Make.py \
+            --overrideXcodeVersion \
+            --cacheDir="$HOME/telegram-bazel-cache" \
+            build \
+            --configurationPath=build-system/appstore-configuration.json \
+            --codesigningInformationPath=build-system/fake-codesigning \
+            --configuration=debug_sim_arm64 \
+            --buildNumber=1 \
+            --continueOnError 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: List compiler errors on the summary page
+        if: always()
+        run: |
+          {
+            echo "## Compiler errors"
+            echo '```'
+            grep -E "error:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
+            echo '```'
+            echo "## Last lines of the log"
+            echo '```'
+            tail -n 60 "$GITHUB_WORKSPACE/build.log" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the full log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
