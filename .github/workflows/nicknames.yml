@@ -55,7 +55,7 @@ jobs:
           {
             echo "## Compiler errors"
             echo '```'
-            grep -E "error:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
+            grep -E ": error:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
             echo '```'
             echo "## Last lines of the log"
             echo '```'
