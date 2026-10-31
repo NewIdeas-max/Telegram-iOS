@@ -33,6 +33,9 @@ jobs:
           git apply --whitespace=nowarn "$RUNNER_TEMP/nicknames.patch"
           git status --short
 
+      # Builds the app's code library (every module, ours included) without packaging
+      # and signing the app: the repository's fake provisioning profiles expired on
+      # 2026-10-30, and signing is irrelevant for a compile check.
       - name: Build for the simulator
         run: |
           set -o pipefail
@@ -47,6 +50,7 @@ jobs:
             --codesigningInformationPath=build-system/fake-codesigning \
             --configuration=debug_sim_arm64 \
             --buildNumber=1 \
+            --target=//Telegram:Lib \
             --continueOnError 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
 
       - name: List compiler errors on the summary page
@@ -55,7 +59,7 @@ jobs:
           {
             echo "## Compiler errors"
             echo '```'
-            grep -E ": error:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
+            grep -E ": error:|^ERROR:|ld: |Undefined symbol|duplicate symbol|failed:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
             echo '```'
             echo "## Last lines of the log"
             echo '```'
