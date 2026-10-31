@@ -12,9 +12,17 @@ jobs:
     timeout-minutes: 360
 
     steps:
-      - name: Get the patch from this branch
+      # Uses the patch file committed most recently in this branch, whatever its name
+      # (browsers save repeated downloads as nicknames_1.patch, nicknames_2.patch, ...).
+      - name: Get the newest patch from this branch
         run: |
-          curl -fsSL "https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/nicknames.patch" -o "$RUNNER_TEMP/nicknames.patch"
+          set -e
+          git clone --quiet --filter=blob:none --no-checkout --depth 100 --branch "$GITHUB_REF_NAME" "https://github.com/${{ github.repository }}.git" branch
+          cd branch
+          PATCH=$(git log -1 --format= --name-only --diff-filter=AM -- '*.patch' | head -n 1)
+          echo "Using patch: $PATCH"
+          git show "HEAD:$PATCH" | tr -d '\r' > "$RUNNER_TEMP/nicknames.patch"
+          echo "PATCH_NAME=$PATCH" >> "$GITHUB_ENV"
           wc -l "$RUNNER_TEMP/nicknames.patch"
 
       - name: Check out Telegram-iOS at the commit the patch was made against
@@ -56,9 +64,10 @@ jobs:
         if: always()
         run: |
           {
+            echo "## Patch: $PATCH_NAME"
             echo "## Compiler errors"
             echo '```'
-            grep -E ": error:|^ERROR:|ld: |Undefined symbol|duplicate symbol|failed:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
+            grep -E ": error:|^ERROR:|ld: error|Undefined symbol|duplicate symbol|failed:" "$GITHUB_WORKSPACE/build.log" | sed -E 's#^.*/telegram/##' | sort -u | head -200 || echo "none found"
             echo '```'
             echo "## Last lines of the log"
             echo '```'
